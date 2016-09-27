@@ -1,0 +1,7 @@
+name = Webform Elected Example Data Source
+description = Example for a Webform Elected Data Source.
+core = 7.x
+dependencies[] = webform_elected
+package = Webform
+
+hidden = TRUE

@@ -1,0 +1,78 @@
+<?php
+
+/**
+ * Implementation of hook_schema().
+ */
+function webform_elected_schema() {
+  $textfield_default = array(
+    'type' => 'varchar',
+    'length' => 255,
+    'not null' => TRUE,
+    'default' => '',
+  );
+  $schema['webform_elected_officials'] = array(
+    'fields' => array(
+      'oid' => array(
+        'description' => '',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+
+      'data_source_type' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      'nid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Node ID of Webform component.',
+      ),
+
+      'cid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Component ID of Webform component.',
+      ),
+
+      'unique_id' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      // see below for more fields.
+
+    ),
+    'primary key' => array('oid'),
+    'unique keys' => array(
+      'name' => array('data_source_type', 'nid', 'cid', 'unique_id'),
+    ),
+  );
+
+  if (! function_exists('webform_elected_get_text_field_info')) {
+    module_load_include('module', 'webform_elected', 'webform_elected');
+  }
+
+  foreach (webform_elected_get_text_field_info() as $field_name => $field_info) {
+    $schema['webform_elected_officials']['fields'][$field_name] = array(
+      'description' => $field_info['description'],
+    ) + $textfield_default;
+  }
+
+  $schema['webform_elected_officials']['fields']['data'] = array(
+    'type' => 'blob',
+    'not null' => FALSE,
+    'size' => 'big',
+    'serialize' => TRUE,
+    'description' => '',
+  );
+
+  return $schema;
+}

@@ -1,0 +1,18 @@
+# Created by .ignore support plugin (hsz.mobi)
+### RG.-ignore-tpl template
+# IntelliJ project files
+.idea
+out
+gen
+
+# Ignore the node modules folder (created by 'npm install').
+node_modules
+
+# We absolutely don't want to have the .sass-cache in git.
+.sass-cache
+
+# Or DS_Store from OSX.
+.DS_Store
+
+# Or the Remote Sync plugin for Atom.
+.remote-sync.json

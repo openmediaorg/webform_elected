@@ -1,0 +1,5 @@
+name = Webform Elected Data Source: Members of European Parliament
+description = Members of European Parliament as a Webform Elected Data Source.
+core = 7.x
+dependencies[] = webform_elected
+package = Webform

@@ -1,0 +1,227 @@
+<?php
+
+
+/**
+ * @return array
+ *   The available representative sets keyed by machine name.
+ */
+function webform_elected_opennorth_represent_representative_sets() {
+  $representative_sets = array();
+
+  $resources = represent_representative_sets();
+  if (!empty($resources)) {
+    $skip = webform_elected_opennorth_represent_skip_representative_set();
+    foreach ($resources as $resource) {
+      $machine_name = represent_get_machine_name($resource->url);
+      if (!in_array($machine_name, $skip)) {
+        $representative_sets[$machine_name] = $resource;
+      }
+    }
+  }
+
+  return $representative_sets;
+}
+
+function webform_elected_opennorth_represent_format_resource($resource) {
+  if (isset($resource->email)) {
+    // Skips mayors.
+    if (!empty($resource->district_name)) {
+      return "$resource->name ($resource->district_name) $resource->elected_office, $resource->representative_set_name";
+    }
+  }
+  return '';
+}
+
+/**
+ * Option list containing the representatives in a representative set.
+ */
+function webform_elected_opennorth_represent_resource_options($resources) {
+  $options = array();
+  foreach ($resources as $representative_set => $set_resources) {
+    foreach ($set_resources as $resource) {
+      // TODO: OK Save the resource
+      if ($formatted_resource = webform_elected_opennorth_represent_format_resource($resource)) {
+        $options[$resource->email] = $formatted_resource;
+        $_SESSION['webform_elected_resources'][$resource->email] = $formatted_resource;
+        webform_elected_opennorth_represent_resource_save($resource, $representative_set, $resource->email);
+      }
+    }
+  }
+
+  // Remove representatives with non-unique emails.
+  foreach (array_count_values(array_keys($options)) as $email => $count) {
+    if ($count > 1) {
+      unset($options[$email]);
+
+      watchdog('Represent API', 'Duplicate email "@email" in set "@set"', array(
+          '@email' => $email,
+          '@set' => $representative_set,
+      ), WATCHDOG_WARNING);
+    }
+  }
+  asort($options);
+  return $options;
+}
+
+
+
+/**
+ * @return array
+ *   Machine names of representative sets containing representatives from
+ *   multiple jurisdictions.
+ */
+function webform_elected_opennorth_represent_skip_representative_set() {
+  return array(
+    /*
+        'elus-municipaux-du-quebec',
+        'municipal-officials-of-alberta',
+        'municipal-officials-of-british-columbia',
+    */
+  );
+}
+
+function webform_elected_opennorth_represent_resource_load($representative_set, $email) {
+  static $resources;
+  if (!isset($resources[$representative_set][$email])) {
+    // Load from DB
+    // TODO: Figure out how we can work in representative set
+    $result = db_select('webform_elected_resources', 'wrr')
+        ->fields('wrr', array('resource'))
+//        ->condition('representative_set', $representative_set, '=')
+        ->condition('email', $email, '=')
+        ->execute()
+        ->fetchAssoc();
+    if ($result) {
+      if ($resource = unserialize($result['resource'])) {
+        $resources[$representative_set][$email] = $resource;
+      }
+    }
+  }
+  if (isset($resources[$representative_set][$email])) {
+    return $resources[$representative_set][$email];
+  }
+}
+
+function webform_elected_opennorth_represent_resource_save($resource, $representative_set, $email) {
+  $serialized_resource = serialize($resource);
+  // db_select to check if current value exists
+  $result = db_select('webform_elected_opennorth_represent_resources', 'wrr')
+    ->fields('wrr', array('resource'))
+    ->condition('representative_set', $representative_set, '=')
+    ->condition('email', $email, '=')
+    ->execute()
+    ->fetchAssoc();
+  if ($result) {
+    // Compare DB value to current value
+    $db_serialized_resource = $result['resource'];
+    if (strcmp($serialized_resource, $db_serialized_resource)) {
+      // Save new serialized resource to the DB
+      db_update('webform_elected_resources')
+        ->fields(
+          array(
+            'resource' => $serialized_resource,
+          )
+        )
+        ->condition('representative_set', $representative_set, '=')
+        ->condition('email', $email, '=')
+        ->execute();
+    }
+  }
+  else {
+    // Insert new resource into the DB
+    db_insert('webform_elected_resources')
+      ->fields(
+        array(
+          'representative_set' => $representative_set,
+          'email' => $email,
+          'resource' => $serialized_resource,
+        )
+      )
+      ->execute();
+  }
+}
+
+/*
+ *
+ */
+function webform_elected_opennorth_represent_get_representatives($represent_sets, $emails, $multiple = FALSE) {
+  $representatives = array();
+  foreach ($represent_sets as $represent_set) {
+    if ($represent_set) {
+      foreach ($emails as $email) {
+        if ($email) {
+          if ($represent_resource = webform_elected_opennorth_represent_resource_load($represent_set, $email)) {
+            if ($multiple) {
+              $representatives[] = $represent_resource;
+            }
+            else {
+              return $represent_resource;
+            }
+          }
+        }
+      }
+    }
+  }
+  return $representatives;
+}
+
+/**
+ * Option list containing representative sets
+ */
+function webform_elected_opennorth_represent_options_source(){
+  webform_component_include('select');
+  $options = array('' => t('- Select -'));
+  $names = webform_elected_opennorth_represent_representative_sets();
+  foreach ($names as $machine_name => $representative_set) {
+    $options[$machine_name] = $representative_set->name;
+  }
+  asort($options);
+  return $options;
+}
+
+/**
+ * Option list containing the representatives in a representative set.
+ */
+function webform_elected_opennorth_represent_options_representatives($component, $flat, $filter, $arguments) {
+  $options = array();
+
+  $without_district = preg_match('/-without-district$/', $arguments);
+  if ($without_district) {
+    $arguments = preg_replace('/-without-district$/', '', $arguments);
+  }
+
+  $resources = represent_representatives_by_set($arguments);
+  if (!empty($resources)) {
+    foreach ($resources as $resource) {
+      if (isset($resource->email)) {
+        // Skips mayors.
+        if (!empty($resource->district_name)) {
+          $name = '';
+          if (isset($resource->extra) && isset($resource->extra->honorific_prefix) && in_array($resource->extra->honorific_prefix, array('Hon.', 'Right Hon.'))) {
+            $name .= "{$resource->extra->honorific_prefix} ";
+          }
+          $name .= $resource->name;
+          if (!$without_district) {
+            $name .= " ({$resource->district_name})";
+          }
+          $options[$resource->email] = $name;
+        }
+      }
+    }
+
+    // Remove representatives with non-unique emails.
+    foreach (array_count_values(array_keys($options)) as $email => $count) {
+      if ($count > 1) {
+        unset($options[$email]);
+
+        watchdog('Represent API', 'Duplicate email "@email" in set "@set"', array(
+          '@email' => $email,
+          '@set' => $arguments,
+        ), WATCHDOG_WARNING);
+      }
+    }
+
+    $options = webform_elected_sort_names_without_honorific($options);
+  }
+  return $options;
+}

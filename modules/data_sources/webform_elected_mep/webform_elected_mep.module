@@ -1,0 +1,148 @@
+<?php
+
+/**
+ * Implements hook_webform_component_info().
+ */
+function webform_elected_mep_webform_component_info() {
+  return array(
+    'mep_constituency' => array(
+      'label' => t('MEP Constituency'),
+      'description' => t('Look up Constituencies of the European Parliament with a 2-level hierachical select widget.'),
+      'features' => array(
+        'csv' => TRUE,
+        'email' => FALSE,
+        'email_address' => FALSE,
+        'email_name' => FALSE,
+        'required' => TRUE,
+        'title_display' => TRUE,
+        'title_inline' => TRUE,
+        'conditional' => TRUE,
+        'group' => FALSE,
+        'spam_analysis' => FALSE,
+        'attachment' => FALSE,
+      ),
+      'file' => 'components/mep_constituency.inc',
+    )
+  );
+}
+
+/**
+ * Pre render callback.
+ */
+function webform_elected_mep_pre_render_cleanup($element) {
+  // So this is a bit of a puzzle.  Calling an empty pre_render
+  // seems to prevent the field label from appearing twice.
+  return $element;
+}
+
+/**
+ * Custom theme function for collected Elected data.
+ */
+function theme_webform_display_mep_constituency($variables) {
+  $element = $variables['element'];
+  $value = $element['#value'];
+
+  return $value;
+}
+
+// TODO caching
+function webform_elected_mep_get_countries() {
+  $sql = "
+    SELECT
+      country AS optionValue
+    , country AS optionLabel
+    FROM {webform_elected_mep} AS mep
+    GROUP BY
+      optionValue
+  ";
+  return db_query($sql)->fetchAllKeyed();
+}
+
+// TODO caching
+function webform_elected_mep_get_constituencies() {
+  $constituencies_by_country = array();
+
+  // Doing the concatenation in SQL allows us to GROUP BY the generated value.
+  $sql = "
+    SELECT
+      CONCAT(country, '--', constituency) AS optionValue
+    , constituency AS optionLabel
+    , country AS countryValue
+    FROM {webform_elected_mep} AS mep
+    GROUP BY
+      optionValue
+  ";
+  $result = db_query($sql)->fetchAllAssoc('optionValue');
+  foreach ($result as $row) {
+    $constituencies_by_country[$row->countryValue][$row->optionValue] = $row->optionLabel;
+  }
+  return $constituencies_by_country;
+}
+
+/**
+ * Offer what ip2country module thinks is the user's country as default choice.
+ */
+function webform_elected_mep_get_default_country($fallback_country_name = '') {
+  global $user;
+
+  // The ip2country module sets $user->data['country_iso_code_2'] for logged-in users.
+  if (isset($user->data['country_iso_code_2'])) {
+    $country_code = $user->data['country_iso_code_2'];
+  }
+  else if (is_callable('ip2country_get_country')) {
+    // For anonymous users we do it like this:
+    $ip = ip_address();
+    // $ip = '93.210.15.68'; // "German" IP address, for testing.
+    // $ip = '62.6.1.1'; // "UK" IP address, for testing.
+    $country_code = ip2country_get_country($ip);
+  }
+
+  $country_code_to_name = webform_elected_mep_get_country_code_to_name_mapping();
+  if (isset($country_code_to_name[$country_code])) {
+    return $country_code_to_name[$country_code];
+  }
+
+  if (! empty($fallback_country_name)) {
+    return $fallback_country_name;
+  }
+  else {
+    return variable_get('webform_elected_mep_fallback_country_name', '');
+  }
+}
+
+function webform_elected_mep_get_country_code_to_name_mapping() {
+  // These countries' names where present in the MEP CSV as of 2016-09-14
+  // The codes where checked against the {ip2country} table.
+  // We are not using Drupal's country_get_list() because it translates the
+  // country names which we have to match against the incoming CSV.
+  return array(
+    'AT' => 'Austria',
+    'BE' => 'Belgium',
+    'BG' => 'Bulgaria',
+    'HR' => 'Croatia',
+    'CY' => 'Cyprus',
+    'CZ' => 'Czech Republic',
+    'DK' => 'Denmark',
+    'EE' => 'Estonia',
+    'FI' => 'Finland',
+    'FR' => 'France',
+    'DE' => 'Germany',
+    'GR' => 'Greece',
+    'HU' => 'Hungary',
+    'IE' => 'Ireland',
+    'IT' => 'Italy',
+    'LV' => 'Latvia',
+    'LT' => 'Lithuania',
+    'LU' => 'Luxembourg',
+    'MT' => 'Malta',
+    'NL' => 'Netherlands',
+    'PL' => 'Poland',
+    'PT' => 'Portugal',
+    'RO' => 'Romania',
+    'SK' => 'Slovakia',
+    'SI' => 'Slovenia',
+    'ES' => 'Spain',
+    'SE' => 'Sweden',
+    'GB' => 'United Kingdom',
+  );
+}

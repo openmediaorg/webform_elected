@@ -1,0 +1,75 @@
+<?php
+
+/**
+ * Implementation of hook_schema().
+ */
+function webform_elected_mep_schema() {
+  $schema['webform_elected_mep'] = array(
+    'fields' => array(
+      'mid' => array(
+        'description' => '',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+
+      'unique_id' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => 'The MEP User ID',
+      ),
+
+      'country' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      'constituency' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      'first_name' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      'last_name' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      'email' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+
+      // 'phone' => array(
+      //   'type' => 'varchar',
+      //   'length' => 255,
+      //   'not null' => TRUE,
+      //   'default' => '',
+      // ),
+    ),
+    'primary key' => array('mid'),
+    'unique keys' => array(
+      'unique_MEP_user_id' => array('unique_id'),
+    ),
+    'indexes' => array(
+      'country_constituency' => array('country', 'constituency'),
+    ),
+  );
+
+  return $schema;
+}

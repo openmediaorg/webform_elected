@@ -1,0 +1,5 @@
+name = Webform Elected
+description = Creates a Webform component to look up elected leaders.
+core = 7.x
+dependencies[] = webform
+package = Webform

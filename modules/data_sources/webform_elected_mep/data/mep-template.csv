@@ -1,0 +1,4 @@
+UserID,Country,Constituency,FirstName,LastName,Email,Phone
+123,Germany,Germany,Hans,Meier,hans.meier@europarl.europa.eu,+322 28 12345
+456,United Kingdom,East Midlands,Paul,Smith,paul.smith@europarl.europa.eu,+333 88 1 12345
+789,United Kingdom,London,Erica,Miller,erica.miller@europarl.europa.eu,+333 88 1 23456

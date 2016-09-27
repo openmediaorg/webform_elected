@@ -1,0 +1,624 @@
+<?php
+
+/**
+ * @file
+ *   Provides an Elected Webform component.
+ */
+
+/**
+ * Implements hook_webform_component_info().
+ */
+function webform_elected_webform_component_info() {
+  return array(
+    'elected' => array(
+      'label' => t('Elected'),
+      'description' => t('Look up elected representatives by postal code.'),
+      'features' => array(
+        'csv' => TRUE,
+        'email' => TRUE,
+        'email_address' => TRUE,
+        'email_name' => FALSE,
+        'required' => TRUE,
+        'title_display' => TRUE,
+        'title_inline' => TRUE,
+        'conditional' => TRUE,
+        'group' => FALSE,
+        'spam_analysis' => FALSE,
+        'attachment' => FALSE,
+      ),
+      'file' => 'components/elected.inc',
+    )
+  );
+}
+
+/**
+ * Implements hook_hook_info().
+ */
+function webform_elected_hook_info() {
+  $hooks = array(
+    'webform_elected_get_data_source_type_info',
+    'webform_elected_data_source_settings_form_alter',
+    'webform_elected_lookup',
+  );
+  return array_fill_keys($hooks, array('group' => 'webform_elected'));
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function webform_elected_form_webform_client_form_alter(&$form, &$form_state, $form_id) {
+  $elected_components = array();
+  foreach ($form_state['webform']['component_tree']['children'] as $key => $component) {
+    if ('elected' == $component['type']) {
+      $elected_components[] = $component;
+    }
+  }
+  if (0 < count($elected_components)) {
+    webform_elected_alter_form_components($form, $form_state, $elected_components);
+  }
+}
+
+/**
+ *
+ */
+function webform_elected_alter_form_components(&$form, &$form_state, $elected_components) {
+  foreach ($elected_components as $component) {
+    $extra = $component['extra'];
+    $form_key = $component['form_key'];
+
+    $key_component = NULL;
+
+    // Find key webform component.
+    if (isset($extra['data_source']['key_component_cid'])) {
+      $key_component_cid = $extra['data_source']['key_component_cid'];
+      // Find this component's associated key component.
+      foreach ($form_state['webform']['component_tree']['children'] as $potential_key_component) {
+        if (isset($potential_key_component['cid']) && $potential_key_component['cid'] == $key_component_cid) {
+          $key_component = $potential_key_component;
+          $key_component_form_key = $key_component['form_key'];
+          break;
+        }
+      }
+    }
+
+    if ($key_component) {
+      webform_elected_alter_form_components_add_ajax($form, $form_state, $component, $key_component);
+
+      $key_component_value = NULL;
+
+      // Populated both, during AJAX, *and* when on different pages.
+      if (isset($form_state['input']['submitted'][$key_component_form_key])) {
+        $key_component_value = $form_state['input']['submitted'][$key_component_form_key];
+      }
+
+      // Only populated during AJAX.
+      if (isset($form_state['values']['submitted'][$key_component_form_key])) {
+        $key_component_value = $form_state['values']['submitted'][$key_component_form_key];
+      }
+
+      // Only populated during AJAX.
+      if (isset($form_state['values']['submitted'][$key_component_cid])) {
+        $key_component_value = $form_state['values']['submitted'][$key_component_cid];
+      }
+
+      if (is_null($key_component_value)) {
+        if ($extra['autoselect_hide'] && isset($form['submitted'][$form_key])) {
+          $form['submitted'][$form_key]['#title_display'] = 'none';
+        }
+        return;
+      }
+
+      // The form element for the Elected component is only populated:
+      // - during AJAX
+      // - during a second hook_form_alter() call via drupal_rebuild_form()
+      //   (If the Elected component is not on the first page.)
+      if (isset($form['submitted'][$form_key])) {
+        $elected_form_element = & $form['submitted'][$form_key];
+        $options = webform_elected_get_options($key_component_value, $component);
+        if (0 == count($options)) {
+          // No options found.
+          // TODO: Watchdog
+          // TODO retain AJAX wrapper
+          // TODO show "empty" message
+          // Remove component.
+          // unset($form['submitted'][$form_key]);
+        }
+        else {
+          if ($extra['autoselect_hide'] && empty($form_state['values']['submitted'][$component['cid']])) {
+            // Make this hidden, unless there is already a value set
+            $elected_form_element['#type'] = 'hidden';
+            $elected_form_element['#title_display'] = 'none';
+            if ($extra['multiple']) {
+              $elected_form_element['#value'] = array_keys($options);
+            }
+            else {
+              $elected_form_element['#value'] = key($options);
+            }
+          }
+          else {
+            $elected_form_element['#options'] = $options;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Add AJAX to webform form if both form elements are on the current page.
+ */
+function webform_elected_alter_form_components_add_ajax(&$form, &$form_state, $elected_component, $key_component) {
+  static $ajax_settings = array(
+    'keyComponentIds' => array(),
+    'keyComponentTypes' => array(),
+    'representNames' => array(),
+  );
+
+  // Some shortcut variables.
+  $elected_component_form_key = $elected_component['form_key'];
+  $key_component_form_key = $key_component['form_key'];
+  $key_component_cid = $key_component['cid'];
+
+  // The conditions under which to run.
+  $is_on_same_page = ($key_component['page_num'] == $elected_component['page_num']);
+  $has_key_form_element = isset($form['submitted'][$key_component_form_key]);
+  $has_elected_form_element = isset($form['submitted'][$elected_component_form_key]);
+
+  // AJAX only happens with the key component on the same page as the elected component.
+  // And both component's form elements have to be on the current page.
+  if ($is_on_same_page && $has_key_form_element && $has_elected_form_element) {
+    // Add a wrapper around our component to later be replaced by AJAX results.
+    $form['submitted'][$elected_component_form_key]['#prefix'] = '<div id="' . webform_elected_get_ajax_wrapper_id($elected_component_form_key) . '">';
+    $form['submitted'][$elected_component_form_key]['#suffix'] = '</div>';
+
+    // Add our AJAX callback to this components key component field.
+    $form['submitted'][$key_component_form_key]['#ajax'] = array(
+      'callback' => 'webform_elected_ajax_callback',
+      'event' => 'webformElectedKeyComponentUpdated', // Use custom event to avoid interference from browser-generated events like "input" or "change".
+    );
+
+    // Track this key component's associated Elected component form key so we know
+    // what portion of the form to update.
+    $form_state['build_info']['args']['elected_by_key_cid'][$key_component_cid] = $elected_component_form_key;
+
+    $key_component_id = 'edit-submitted-' . str_replace('_', '-', $key_component_form_key);
+    $represent_name = 'submitted[' . $elected_component_form_key . ']';
+
+    array_push($ajax_settings['keyComponentIds'], $key_component_id);
+    array_push($ajax_settings['representNames'], $represent_name);
+    $ajax_settings['keyComponentTypes'][$key_component_id] = $key_component['type'];
+
+    $form['#attached']['js'] = array(
+      array(
+        'data' => array(
+          'webformElected' => $ajax_settings,
+        ),
+        'type' => 'setting',
+      ),
+      drupal_get_path('module', 'webform_elected') . '/js/webform_elected.js',
+    );
+  }
+}
+
+/**
+ * Returns the part of the form we want to update with AJAX.
+ */
+function webform_elected_ajax_callback($form, $form_state) {
+  $render_array = array('#markup' => t('There was a problem finding this key component\'s associated component.'));
+
+  // Get the triggering element's cid and attempt to look up its associated element.
+  if (isset($form_state['triggering_element']['#webform_component']['cid'])) {
+    $key_component_cid = $form_state['triggering_element']['#webform_component']['cid'];
+    if (isset($form_state['build_info']['args']['elected_by_key_cid'][$key_component_cid])) {
+      $elected_component_form_key = $form_state['build_info']['args']['elected_by_key_cid'][$key_component_cid];
+      $render_array = render($form['submitted'][$elected_component_form_key]);
+    }
+  }
+
+  return array(
+    '#type' => 'ajax',
+    '#commands' => array(
+      ajax_command_replace('#' . webform_elected_get_ajax_wrapper_id($elected_component_form_key), render($render_array)),
+    ),
+  );
+}
+
+/**
+ * Returns the wrapper id of the part of the form we want to update with ajax.
+ */
+function webform_elected_get_ajax_wrapper_id($elected_component_form_key) {
+  return 'webform_elected_' . $elected_component_form_key . '_replace';
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function webform_elected_form_webform_component_edit_form_alter(&$form, &$form_state, $form_id) {
+  // For AJAX, use $form_state['values'] to reflect latest (but yet unsaved) user choices.
+  $values = isset($form_state['values']) ? $form_state['values'] : array();
+
+  $component = $form_state['build_info']['args'][1];
+  if ('elected' != $component['type']) {
+    return;
+  }
+
+  if (isset($values['extra']['data_source_type'])) {
+    $data_source_type = $values['extra']['data_source_type'];
+  }
+  else {
+    $data_source_type = $form['elected']['data_source_type']['#default_value'];
+  }
+
+  if ('' == $data_source_type) {
+    $form['elected']['data_source']['please_choose'] =  array(
+      '#type' => 'markup',
+      '#markup' => '<h1>' . t('Please choose a data source type!') . '</h1>',
+    );
+    return;
+  }
+
+  $data_source_type_infos = webform_elected_get_data_source_type_info();
+  $data_source_type_info = $data_source_type_infos[$data_source_type];
+
+  $node = $form['#node'];
+  $key_component_options = array('' => t('- Select -'));
+  if (!empty($node->webform['components'])) {
+    foreach ($node->webform['components'] as $potential_key_component) {
+      if (in_array($potential_key_component['type'], $data_source_type_info['key_component_types'])) {
+        $key_component_options[$potential_key_component['cid']] = $potential_key_component['name'];
+      }
+    }
+  }
+
+  $form['elected']['data_source']['key_component_cid'] = array(
+    '#title'         => t('Key component'),
+    '#type'          => 'select',
+    '#options'       => $key_component_options,
+    '#default_value' => $component['extra']['data_source']['key_component_cid'],
+    '#description'   => t('The key component to use to find elected officials.'),
+    '#required'      => TRUE,
+    '#parents' => array('extra', 'data_source', 'key_component_cid'),
+    '#weight' => 1,
+  );
+
+  $extra_alter_parameters = array(
+    'node' => $node,
+    'component' => $component,
+    'data_source_type' => $data_source_type,
+    'data_source_type_info' => $data_source_type_info,
+  );
+  drupal_alter('webform_elected_data_source_settings_form', $form, $form_state, $extra_alter_parameters);
+}
+
+/**
+ * Returns the part of the edit form we want to update with ajax.
+ */
+function _webform_edit_elected_ajax_callback($form, $form_state) {
+  $render_array = $form['elected']['data_source'];
+
+  return array(
+    '#type' => 'ajax',
+    '#commands' => array(
+      ajax_command_replace('#webform-elected-data-source-settings', render($render_array)),
+    ),
+  );
+}
+
+function webform_elected_get_options($key_component_value, $component) {
+  $options = array();
+  $result = webform_elected_lookup($key_component_value, $component);
+  foreach ($result as $full_unique_id => $row) {
+    $options[$full_unique_id] = webform_elected_get_option_label($component, $row);
+  }
+  return $options;
+}
+
+function webform_elected_lookup($key_component_value, $component) {
+  $result = array();
+  if (isset($component['extra']['data_source_type'])) {
+    $data_source_type = $component['extra']['data_source_type'];
+    $data_source_type_info = webform_elected_get_data_source_type_info($data_source_type);
+    if (isset($data_source_type_info['module'])) {
+      $module = $data_source_type_info['module'];
+      $key_component_value = is_array($key_component_value) ? array_pop($key_component_value) : $key_component_value;
+      $officials = (array) module_invoke($module, 'webform_elected_lookup', $key_component_value, $component);
+      foreach ($officials as $official) {
+        $row = webform_elected_save_official($component, $data_source_type_info, $official);
+        $full_unique_id = webform_elected_get_full_unique_id($row);
+        $result[$full_unique_id] = $row;
+      }
+    }
+  }
+  return $result;
+}
+
+function webform_elected_load_official($full_unique_id) {
+  $keys = webform_elected_get_key_fields_from_full_unique_id($full_unique_id);
+  $official = db_select('webform_elected_officials', 'weo')
+    ->fields('weo')
+    ->condition('weo.data_source_type', $keys['data_source_type'])
+    ->condition('weo.nid', $keys['nid'])
+    ->condition('weo.cid', $keys['cid'])
+    ->condition('weo.unique_id', $keys['unique_id'])
+    ->execute()
+    ->fetchAssoc(PDO::FETCH_ASSOC);
+  return $official ? $official : array();
+}
+
+function webform_elected_save_official($component, $data_source_type_info, array $official) {
+  $row = array(
+    'data_source_type' => $component['extra']['data_source_type'],
+    'nid' => $data_source_type_info['unique_only_by_component'] ? $component['nid'] : 0,
+    'cid' => $data_source_type_info['unique_only_by_component'] ? $component['cid'] : 0,
+  );
+  $row = $row + $official;
+  foreach (webform_elected_get_text_field_info() as $field_name => $field_info) {
+    $row[$field_name] = isset($official[$field_name]) ? $official[$field_name] : '';
+  }
+  $row['data'] = isset($official['data']) ? $official['data'] : array();
+  $row['unique_id'] = isset($official['unique_id']) ? $official['unique_id'] : webform_elected_make_unique_id($official);
+
+  // Find out if INSERT or UPDATE
+  $already_there = db_select('webform_elected_officials', 'weo')
+    ->fields('weo', array('oid'))
+    ->condition('weo.data_source_type', $row['data_source_type'])
+    ->condition('weo.nid', $row['nid'])
+    ->condition('weo.cid', $row['cid'])
+    ->condition('weo.unique_id', $row['unique_id'])
+    ->execute()
+    ->fetchCol();
+
+  $primary_keys = (0 < count($already_there)) ? array('data_source_type', 'nid', 'cid', 'unique_id') : array();
+
+  drupal_write_record('webform_elected_officials', $row, $primary_keys);
+
+  return $row;
+}
+
+function webform_elected_make_unique_id(array $official) {
+  $key_part_field_names = array(
+    'jurisdiction',
+    'first_name',
+    'last_name',
+    'email',
+    'phone',
+  );
+  $key_parts = array_intersect_key($official, array_flip($key_part_field_names));
+  // TODO maybe use SHA1 or so.
+  return implode(':', $key_parts);
+}
+
+function webform_elected_get_option_label($component, $row) {
+  if (empty($row['full_name'])) {
+    return $row['first_name'] . ' ' . $row['last_name'];
+  }
+  else {
+    return $row['full_name'];
+  }
+}
+
+function webform_elected_get_full_unique_id($row) {
+  return $row['data_source_type'] . '@' . $row['nid'] . '@' . $row['cid'] . '@' . $row['unique_id'];
+}
+
+function webform_elected_get_key_fields_from_full_unique_id($full_unique_id) {
+  $parts = explode('@', $full_unique_id, 4);
+  return array(
+    'data_source_type' => $parts[0],
+    'nid' => $parts[1],
+    'cid' => $parts[2],
+    'unique_id' => $parts[3],
+  );
+}
+
+function webform_elected_get_data_source_type_info($data_source_type = NULL) {
+  $default_info = array(
+    'unique_only_by_component' => TRUE,
+  );
+  $return = array();
+  // Use module_invoke() individually, not module_invoke_all(), so that we know
+  // which info came from which module.
+  foreach (module_implements('webform_elected_get_data_source_type_info') as $module) {
+    $result = (array) module_invoke($module, 'webform_elected_get_data_source_type_info');
+    foreach ($result as & $data_source_info) {
+      $data_source_info = (array) $data_source_info;
+      $data_source_info['module'] = $module;
+      $data_source_info = $data_source_info + $default_info;
+    }
+    $return = array_merge_recursive($return, $result);
+  }
+  if (is_null($data_source_type)) {
+    return $return;
+  }
+  else {
+    return isset($return[$data_source_type]) ? $return[$data_source_type] : array();
+  }
+}
+
+/**
+ * Define the fields for an elected official resource.
+ *
+ * NOTE: You MUST write a hook_update_N() implementation if you change this
+ * function, because it is used in the schema definition!
+ *
+ * TODO Move to separate .inc file because this gets called from hook_install().
+ */
+function webform_elected_get_text_field_info() {
+  return array(
+    'jurisdiction' => array(
+      'description' => t('The jurisdiction of the elected official.'),
+    ),
+
+    'first_name' => array(
+      'description' => t('The first name of the elected official.'),
+    ),
+
+    'last_name' => array(
+      'description' => t('The last name of the elected official.'),
+    ),
+
+    'full_name' => array(
+      'description' => t('The full name of the elected official, including honorific prefixes and suffixes.'),
+    ),
+
+    'position' => array(
+      'description' => t('The position of the elected official.'),
+    ),
+
+    'email' => array(
+      'description' => t('The email of the elected official.'),
+    ),
+
+    'phone' => array(
+      'description' => t('The phone number of the elected official.'),
+    ),
+
+    'twitter' => array(
+      'description' => t('The twitter handle of the elected official.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme_registry_alter().
+ *
+ * TODO Use hook_module_implements_alter() to make sure our
+ * webform_elected_theme_registry_alter() overrides any other implementations.
+ * Plus offer a Drupal variable to store other module's overrides and execute
+ * them in order.
+ */
+function webform_elected_theme_registry_alter(&$theme_registry) {
+  if (!empty($theme_registry['webform_mail_headers'])) {
+    $theme_registry['webform_mail_headers']['function'] = 'webform_elected_theme_webform_mail_headers';
+  }
+}
+
+/**
+ * @see theme_webform_mail_headers().
+ *
+ * Theme the headers when sending an email from webform.
+ *
+ * @param $node
+ *   The complete node object for the webform.
+ * @param $submission
+ *   The webform submission of the user.
+ * @param $email
+ *   If you desire to make different e-mail headers depending on the recipient,
+ *   you can check the $email['email'] property to output different content.
+ *   This will be the ID of the component that is a conditional e-mail
+ *   recipient. For the normal e-mails, it will have the value of 'default'.
+ * @return
+ *   An array of headers to be used when sending a webform email. If headers
+ *   for "From", "To", or "Subject" are set, they will take precedence over
+ *   the values set in the webform configuration.
+ */
+function webform_elected_theme_webform_mail_headers($variables) {
+  $headers = theme_webform_mail_headers($variables);
+  $webform_node = $variables['node'];
+  $webform_submission = $variables['submission'];
+  $webform_email = $variables['email'];
+
+  $component = array();
+  $full_unique_ids = array();
+  $to_emails = array();
+
+  if (isset($webform_email['email'], $webform_node->webform['components'][$webform_email['email']]['type'])) {
+    $to_email_component_cid = $webform_email['email'];
+    if ('elected' == $webform_node->webform['components'][$to_email_component_cid]['type']) {
+      $component = $webform_node->webform['components'][$to_email_component_cid];
+      $full_unique_ids = $webform_submission->data[$to_email_component_cid];
+    }
+  }
+
+  foreach ($full_unique_ids as $full_unique_id) {
+    $to_email_name = '';
+    $to_email_address = '';
+    $official = webform_elected_load_official($full_unique_id);
+
+    if (isset($official['email'])) {
+      $to_email_address = $official['email'];
+    }
+
+    // Give precedence to "first_name last_name" over "full_name" because
+    // full_name might have punctuation which could confuse email processing
+    // further down the line.
+    if (isset($official['first_name'], $official['last_name'])) {
+      $to_email_name = $official['first_name'] . ' ' . $official['last_name'];
+    }
+    else if (isset($official['full_name'])) {
+      $to_email_name = $official['full_name'];
+    }
+
+    if (! empty($to_email_address)) {
+      if (empty($to_email_name)) {
+        $to_emails[] = $to_email_address;
+      }
+      else {
+        $to_emails[] = '"' . $to_email_name . '" <' . $to_email_address . '>';
+      }
+    }
+  }
+
+  if (0 < count($to_emails)) {
+    $headers['To'] = implode(',', $to_emails);
+  }
+
+  return $headers;
+}
+
+/**
+ * Pre render callback.
+ */
+function webform_elected_pre_render_cleanup($element) {
+  // So this is a bit of a puzzle.  Calling an empty pre_render
+  // seems to prevent the field label from appearing twice.
+  return $element;
+}
+
+/**
+ * Custom theme function for collected Elected data.
+ */
+function theme_webform_display_elected($variables) {
+  $element = $variables['element'];
+  $value = $element['#value'];
+
+  return $value;
+}
+
+/**
+ * Sorts names after removing honorific prefixes.
+ */
+function webform_elected_sort_names_without_honorific(& $names) {
+  uasort($names, 'webform_elected_compare_name');
+  return $names;
+}
+
+/**
+ * Compares names after removing honorific prefixes.
+ *
+ * @param string $a
+ *   A name.
+ * @param string $b
+ *   A name.
+ * @return integer
+ *   -1 if the first name should appear before the second name, 0 if the names
+ *   are identical, and 1 if the first name should appear after the second name.
+ */
+function webform_elected_compare_name($a, $b) {
+  $a = webform_elected_remove_honorific($a);
+  $b = webform_elected_remove_honorific($b);
+  return $a == $b ? 0 : ($a < $b ? -1 : 1);
+}
+
+/**
+ * Removes the honorific prefix from the name.
+ *
+ * @param string $name
+ *   A name.
+ * @return string
+ *   The name without any honorific prefix.
+ */
+function webform_elected_remove_honorific($name) {
+  return preg_replace('/^(Dr\.|M(\.|iss|lle|me|rs?\.|s\.)|(Right )?Hon\.) /', '', $name);
+}
+

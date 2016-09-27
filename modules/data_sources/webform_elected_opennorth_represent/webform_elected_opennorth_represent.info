@@ -1,0 +1,6 @@
+name = Webform Elected Data Source OpenNorth Represent API
+description = Provides the Webform Elected module with data from the OpenNorth Represent API.
+core = 7.x
+dependencies[] = webform_elected
+dependencies[] = represent
+package = Webform
