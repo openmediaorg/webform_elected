@@ -1,4 +1,5 @@
-UserID,Country,Constituency,FirstName,LastName,Email,Phone
-123,Germany,Germany,Hans,Meier,hans.meier@europarl.europa.eu,+322 28 12345
-456,United Kingdom,East Midlands,Paul,Smith,paul.smith@europarl.europa.eu,+333 88 1 12345
-789,United Kingdom,London,Erica,Miller,erica.miller@europarl.europa.eu,+333 88 1 23456
+Addresses/Brussels/Phone,Addresses/Strasbourg/Phone,Country,Constituency,Constituencies/0/end,Facebook/0,Mail/0,Name/family,Name/sur,Photo,Twitter/0,UserID,meta/updated,meta/url
++322 28 45436,+333 88 1 75436,Portugal,Portugal,9999-12-31T00:00:00,,roberto@openmedia.org,GORJAO,Roberto,http://www.europarl.europa.eu/mepphoto/133316.jpg,,133316,2016-09-01T01:00:25,http://www.europarl.europa.eu/meps/en/133316/_history.html
++322 28 45288,+333 88 1 75288,United Kingdom,OM-UK :-),9999-12-31T00:00:00,https://www.facebook.com/heinzkurtbecker,ruth@openmedia.org,COUSTICK-DEAL,Ruth,http://www.europarl.europa.eu/mepphoto/107041.jpg,,107041,2016-08-09T10:21:58,http://www.europarl.europa.eu/meps/en/107041/_history.html
++322 28 45139,+333 88 1 75139,United Kingdom,OM-V :-),9999-12-31T00:00:00,https://www.facebook.com/Eugen.A.Freund,josh@openmedia.org,TABISH,Josh,http://www.europarl.europa.eu/mepphoto/125018.jpg,https://twitter.com/EugenAFreund,125018,2016-09-10T00:58:11,http://www.europarl.europa.eu/meps/en/125018/_history.html
++322 28 45475,+333 88 1 75475,United Kingdom,OM-V :-),9999-12-31T00:00:00,https://www.facebook.com/karin.kadenbach,webteam@openmedia.org,TEAM,Web,http://www.europarl.europa.eu/mepphoto/97014.jpg,http://twitter.com/karinkadenbach,97014,2016-09-10T01:15:51,http://www.europarl.europa.eu/meps/en/97014/_history.html
